@@ -261,23 +261,57 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue | Out-Null
           Write-Host "Animations/transparency/background overhead reduced."
 
-      - name: Enable RDP user + firewall
-        run: |
-          $u=$env:RDP_USER; $p=$env:RDP_PASS
-          $sec = ConvertTo-SecureString $p -AsPlainText -Force
-          if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
-            New-LocalUser -Name $u -Password $sec -AccountNeverExpires
-            Add-LocalGroupMember -Group "Administrators" -Member $u
-            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u
-          } else {
-            Set-LocalUser -Name $u -Password $sec -AccountNeverExpires
-            Enable-LocalUser -Name $u
-            Add-LocalGroupMember -Group "Administrators" -Member $u -EA SilentlyContinue
-            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -EA SilentlyContinue
+             - name: Enable RDP user + firewall
+         run: |
+          $u = $env:RDP_USER
+          $p = $env:RDP_PASS
+
+          if ([string]::IsNullOrWhiteSpace($p)) {
+            Write-Error "RDP password cannot be empty."
+            exit 1
           }
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
+
+          if ($p.Length -lt 8) {
+            Write-Error "RDP password must be at least 8 characters."
+            exit 1
+          }
+
+          if ($p -notmatch '[A-Z]' -or
+              $p -notmatch '[a-z]' -or
+              $p -notmatch '\d' -or
+              $p -notmatch '[^a-zA-Z0-9]') {
+            Write-Error "RDP password must contain uppercase, lowercase, number and special character."
+            exit 1
+          }
+
+          $sec = ConvertTo-SecureString $p -AsPlainText -Force
+
+          if (-not (Get-LocalUser -Name $u -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name $u `
+              -Password $sec `
+              -AccountNeverExpires `
+              -PasswordNeverExpires
+          } else {
+            Set-LocalUser -Name $u `
+              -Password $sec `
+              -AccountNeverExpires `
+              -PasswordNeverExpires
+            Enable-LocalUser -Name $u
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue
+
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name fDenyTSConnections `
+            -Value 0
+
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
-          Write-Host "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
+
+          Write-Host "RDP user configured successfully."
+          Write-Host "User: $u"
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
 
       - name: Install Python libs (pyautogui/pynput/pillow)
         run: |
