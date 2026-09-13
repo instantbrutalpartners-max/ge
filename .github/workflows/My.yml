@@ -500,10 +500,10 @@ jobs:
           # --------------------------------------------------------
 
           foreach ($name in @(
-            "OneDrive",
-            "MicrosoftEdgeUpdate",
-            "GoogleUpdate"
-          )) {
+      "OneDrive",
+     "MicrosoftEdgeUpdate",
+     "GoogleUpdate"
+      )) {
             Get-Process `
               -Name $name `
               -ErrorAction SilentlyContinue |
@@ -648,3 +648,70 @@ jobs:
             $p `
             -AsPlainText `
             -Force
+      # ============================================================
+      # KEEP ALIVE - ORIGINAL STYLE
+      # ============================================================
+
+      - name: Keep alive (to ${{ env.RUNTIME_MINUTES }} mins)
+        run: |
+          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
+          $end = (Get-Date).AddMinutes($mins)
+
+          Write-Host "========================================="
+          Write-Host "RDP KEEP ALIVE STARTED"
+          Write-Host "Runtime: $mins minutes"
+          Write-Host "End time: $($end.ToString('HH:mm:ss'))"
+          Write-Host "========================================="
+
+          while ((Get-Date) -lt $end) {
+
+            # Keep important remote-desktop processes alive
+            $rdpService = Get-Service `
+              -Name TermService `
+              -ErrorAction SilentlyContinue
+
+            if ($rdpService -and $rdpService.Status -ne "Running") {
+              Write-Host "TermService is not running - starting it..."
+              Start-Service `
+                -Name TermService `
+                -ErrorAction SilentlyContinue
+            }
+
+            # Make sure the RDP listener remains enabled
+            Set-ItemProperty `
+              "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+              -Name fDenyTSConnections `
+              -Type DWord `
+              -Value 0 `
+              -ErrorAction SilentlyContinue
+
+            # Keep Remote Desktop firewall rules enabled
+            Enable-NetFirewallRule `
+              -DisplayGroup "Remote Desktop" `
+              -ErrorAction SilentlyContinue
+
+            # Prevent the runner from going idle/sleeping
+            powercfg /change standby-timeout-ac 0 2>$null
+            powercfg /change monitor-timeout-ac 0 2>$null
+
+            # Heartbeat
+            $mode = if ("$env:CRD_ENABLED" -eq '1') {
+              '[CRD+RustDesk/RDP]'
+            }
+            else {
+              '[RustDesk/RDP]'
+            }
+
+            Write-Host (
+              "$mode Heartbeat " +
+              (Get-Date).ToString("HH:mm:ss") +
+              " | Ends: " +
+              $end.ToString("HH:mm:ss") +
+              " | RDP: " +
+              $rdpService.Status
+            )
+
+            Start-Sleep -Seconds 30
+          }
+
+          Write-Host "Runtime completed."
